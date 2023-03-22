@@ -14,12 +14,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 
 #include <omp.h>
 
 #ifdef __AVX2__
 #include <immintrin.h>
 #endif
+
+#include <immintrin.h>
 
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
@@ -803,17 +806,47 @@ void fvec_L2sqr_by_idx(
         size_t d,
         size_t nx,
         size_t ny) {
+    // #pragma omp parallel for
+    //     for (int64_t j = 0; j < nx; j++) {
+    //         const int64_t* __restrict idsj = ids + j * ny;
+    //         const float* xj = x + j * d;
+    //         float* __restrict disj = dis + j * ny;
+    //         for (size_t i = 0; i < ny; i++) {
+    //             if (idsj[i] < 0)
+    //                 continue;
+    //             disj[i] = fvec_L2sqr(xj, y + d * idsj[i], d);
+    //         }
+    //     }
+
 #pragma omp parallel for
-    for (int64_t j = 0; j < nx; j++) {
-        const int64_t* __restrict idsj = ids + j * ny;
-        const float* xj = x + j * d;
-        float* __restrict disj = dis + j * ny;
-        for (size_t i = 0; i < ny; i++) {
-            if (idsj[i] < 0)
+    for (int64_t i = 0; i < nx; i++) {
+        const int64_t* __restrict idsi = ids + i * ny;
+        const float* xi = x + i * d;
+        float* __restrict disi = dis + i * ny;
+        // if (i < nx - 1) {
+        //     const int64_t* __restrict idsii = ids + (i + 1) * ny;
+        //     for (size_t j = 0; j < ny; j++) {
+        //         _mm_prefetch(y + d * idsii[j], _MM_HINT_T0);
+        //     }
+        // }
+        for (size_t j = 0; j < ny; j++) {
+            _mm_prefetch(y + d * idsi[j + 1], _MM_HINT_T0);
+            if (idsi[j] < 0)
                 continue;
-            disj[i] = fvec_L2sqr(xj, y + d * idsj[i], d);
+            disi[j] = fvec_L2sqr(xi, y + d * idsi[j], d);
         }
     }
+
+    // std::vector<std::pair<int, int>> a;
+    // for (int i = 0; i < nx; ++i) {
+    //     for (int j = 0; j < ny; ++j) {
+    //         a.emplace_back(ids[i * ny + j], i * ny + j);
+    //     }
+    // }
+    // std::sort(a.begin(), a.end());
+    // for (auto [id, loc] : a) {
+    //     dis[loc] = fvec_L2sqr(x + loc / ny * d, y + id * d, d);
+    // }
 }
 
 void pairwise_indexed_L2sqr(

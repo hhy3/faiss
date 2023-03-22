@@ -15,6 +15,8 @@ include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 11)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 # Valid values are "generic", "avx2".

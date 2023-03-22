@@ -508,9 +508,10 @@ struct ReservoirHandler : SIMDResultHandler<C, with_id_map> {
                 perm[i] = i;
             }
             // indirect sort of result arrays
-            std::sort(perm.begin(), perm.begin() + res.i, [&res](int i, int j) {
-                return C::cmp(res.vals[j], res.vals[i]);
-            });
+            // std::sort(perm.begin(), perm.begin() + res.i, [&res](int i, int
+            // j) {
+            //     return C::cmp(res.vals[j], res.vals[i]);
+            // });
             for (int i = 0; i < res.i; i++) {
                 heap_dis[i] = res.vals[perm[i]] * one_a + b;
                 heap_ids[i] = res.ids[perm[i]];
