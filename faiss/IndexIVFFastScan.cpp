@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cinttypes>
 #include <cstdio>
+#include <fstream>
 #include <set>
 
 #include <omp.h>

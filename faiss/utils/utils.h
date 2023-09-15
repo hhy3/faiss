@@ -17,6 +17,7 @@
 #define FAISS_utils_h
 
 #include <stdint.h>
+#include <chrono>
 #include <set>
 #include <string>
 #include <vector>
@@ -25,6 +26,19 @@
 #include <faiss/utils/Heap.h>
 
 namespace faiss {
+
+struct Timer {
+#define CUR_TIME std::chrono::high_resolution_clock::now()
+    Timer(const std::string& msg) : msg(msg), start(CUR_TIME) {}
+
+    ~Timer() {
+        auto ed = CUR_TIME;
+        auto ela = std::chrono::duration<double>(ed - start).count();
+        printf("FUCK!!!! [%s] time %lfs\n", msg.c_str(), ela);
+    }
+    std::string msg;
+    std::chrono::time_point<std::chrono::high_resolution_clock> start;
+};
 
 /****************************************************************************
  * Get compile specific variables

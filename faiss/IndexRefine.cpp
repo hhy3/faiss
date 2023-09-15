@@ -13,6 +13,10 @@
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/distances.h>
 #include <faiss/utils/utils.h>
+#include <immintrin.h>
+#include <xmmintrin.h>
+#include "faiss/IndexScalarQuantizer.h"
+#include "faiss/impl/ScalarQuantizer.h"
 
 namespace faiss {
 
@@ -114,42 +118,90 @@ void IndexRefine::search(
         del2.set(base_distances);
     }
 
-    base_index->search(n, x, k_base, base_distances, base_labels);
-
-    for (int i = 0; i < n * k_base; i++)
-        assert(base_labels[i] >= -1 && base_labels[i] < ntotal);
-
-        // parallelize over queries
-#pragma omp parallel if (n > 1)
     {
-        std::unique_ptr<DistanceComputer> dc(
-                refine_index->get_distance_computer());
-#pragma omp for
+        Timer timer("fastscan search");
+        base_index->search(n, x, k_base, base_distances, base_labels);
+    }
+
+    using FuckT = IndexScalarQuantizer;
+    auto refine_fuck = dynamic_cast<FuckT*>(refine_index);
+    uint8_t* codes = refine_fuck->codes.data();
+    size_t code_size = refine_fuck->code_size;
+    auto get_code = [&](int32_t u) { return codes + code_size * u; };
+    auto reduce_add_f32x16 = [](__m512 x) {
+        auto sumh = _mm256_add_ps(
+                _mm512_castps512_ps256(x), _mm512_extractf32x8_ps(x, 1));
+        auto sumhh = _mm_add_ps(
+                _mm256_castps256_ps128(sumh), _mm256_extractf128_ps(sumh, 1));
+        auto tmp1 = _mm_hadd_ps(sumhh, sumhh);
+        return tmp1[0] + tmp1[1];
+    };
+    auto dist_func = [&](const float* x, const uint16_t* y, size_t d) {
+        __m512 sum = _mm512_setzero_ps();
+        for (int i = 0; i < d; i += 16) {
+            auto xx = _mm512_loadu_ps(x + i);
+            auto zz = _mm256_loadu_si256((__m256i*)(y + i));
+            auto yy = _mm512_cvtph_ps(zz);
+            sum = _mm512_fmadd_ps(xx, yy, sum);
+        }
+        return reduce_add_f32x16(sum);
+    };
+    auto prefetch_code = [&](int32_t u, int32_t l) {
+        const uint8_t* code = get_code(u);
+        for (int i = 0; i < l; ++i) {
+            _mm_prefetch(code + i * 64, _MM_HINT_T0);
+        }
+    };
+    {
+        Timer timer("refine search");
+        constexpr int32_t po = 5, pl = 4;
+#pragma omp parallel for schedule(dynamic)
         for (idx_t i = 0; i < n; i++) {
-            dc->set_query(x + i * d);
-            idx_t ij = i * k_base;
+            for (idx_t j = 0; j < po; ++j) {
+                if (j < k_base && base_labels[i * k_base + j] >= 0) {
+                    prefetch_code(base_labels[i * k_base + j], pl);
+                }
+            }
             for (idx_t j = 0; j < k_base; j++) {
-                idx_t idx = base_labels[ij];
+                if (j + po < k_base && base_labels[i * k_base + j + po] >= 0) {
+                    prefetch_code(base_labels[i * k_base + j + po], pl);
+                }
+                idx_t idx = base_labels[i * k_base + j];
                 if (idx < 0)
                     break;
-                base_distances[ij] = (*dc)(idx);
-                ij++;
+                base_distances[i * k_base + j] =
+                        dist_func(x + i * d, (const uint16_t*)get_code(idx), d);
             }
         }
     }
 
-    // sort and store result
-    if (metric_type == METRIC_L2) {
-        typedef CMax<float, idx_t> C;
-        reorder_2_heaps<C>(
-                n, k, labels, distances, k_base, base_labels, base_distances);
+    {
+        Timer timer("refine reorder");
+        // sort and store result
+        if (metric_type == METRIC_L2) {
+            typedef CMax<float, idx_t> C;
+            reorder_2_heaps<C>(
+                    n,
+                    k,
+                    labels,
+                    distances,
+                    k_base,
+                    base_labels,
+                    base_distances);
 
-    } else if (metric_type == METRIC_INNER_PRODUCT) {
-        typedef CMin<float, idx_t> C;
-        reorder_2_heaps<C>(
-                n, k, labels, distances, k_base, base_labels, base_distances);
-    } else {
-        FAISS_THROW_MSG("Metric type not supported");
+        } else if (metric_type == METRIC_INNER_PRODUCT) {
+            typedef CMin<float, idx_t> C;
+            reorder_2_heaps<C>(
+                    n,
+                    k,
+                    labels,
+                    distances,
+                    k_base,
+                    base_labels,
+                    base_distances);
+        } else {
+            FAISS_THROW_MSG("Metric type not supported");
+        }
     }
 }
 

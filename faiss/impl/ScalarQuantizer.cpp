@@ -1068,7 +1068,7 @@ void ScalarQuantizer::set_derived_sizes() {
             bits = 6;
             break;
         case QT_fp16:
-            code_size = d * 2;
+            code_size = (d + 15) / 16 * 16 * 2;
             bits = 16;
             break;
     }

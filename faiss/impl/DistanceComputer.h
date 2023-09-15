@@ -8,6 +8,7 @@
 #pragma once
 
 #include <faiss/Index.h>
+#include <xmmintrin.h>
 
 namespace faiss {
 
@@ -56,6 +57,10 @@ struct DistanceComputer {
     /// compute distance between two stored vectors
     virtual float symmetric_dis(idx_t i, idx_t j) = 0;
 
+    virtual void prefetch(int32_t u) {
+        printf("FUCK!\n");
+    }
+
     virtual ~DistanceComputer() {}
 };
 
@@ -78,6 +83,10 @@ struct FlatCodesDistanceComputer : DistanceComputer {
 
     /// compute distance of current query to an encoded vector
     virtual float distance_to_code(const uint8_t* code) = 0;
+
+    void prefetch(int32_t u) override {
+        _mm_prefetch(codes + u * code_size, _MM_HINT_T0);
+    }
 
     virtual ~FlatCodesDistanceComputer() {}
 };
